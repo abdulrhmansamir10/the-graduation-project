@@ -149,21 +149,23 @@ resource "aws_route_table_association" "devops_rt_assoc_2" {
 # ============================================================================
 
 # EC2 Application Security Group
-# SECURITY FIXES:
-# - SSH restricted to YOUR IP only (not 0.0.0.0/0) - CRITICAL!
+# SECURITY NOTES:
+# - SSH open for CI/CD (GitHub Actions needs access)
 # - HTTP/HTTPS open to internet (application access)
+# - Consider using VPN or bastion host in production
 resource "aws_security_group" "devops_sg" {
   vpc_id      = aws_vpc.devops_vpc.id
   name        = "devops-app-sg"
-  description = "Security group for application servers (SSH restricted!)"
+  description = "Security group for application servers"
 
-  # SSH - ONLY YOUR IP
+  # SSH - Open for CI/CD deployments (GitHub Actions)
+  # NOTE: In production, consider using a VPN or bastion host
   ingress {
-    description = "SSH from your IP only (SECURED)"
+    description = "SSH for CI/CD (GitHub Actions)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.allowed_ssh_cidr] # From variables.tf
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   # HTTP
@@ -437,18 +439,10 @@ resource "aws_launch_template" "app_lt" {
     enabled = true
   }
 
-  # User Data (bootstrap script)
-  # Terraform injects variables into user_data.sh script
-  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
+  # User Data (minimal bootstrap script - Ansible handles the rest)
+  # Terraform injects only the EIP allocation ID
+  user_data = base64encode(templatefile("${path.module}/user_data_minimal.sh", {
     eip_allocation_id = aws_eip.devops_eip.id
-    github_username   = var.github_username
-    github_repo       = var.github_repo
-    db_host           = aws_db_instance.main.address
-    db_name           = var.db_name
-    db_user           = var.db_username
-    db_password       = var.db_password
-    redis_password    = var.redis_password
-    app_secret_key    = var.app_secret_key
   }))
 
   # IMDSv2 (security hardening)

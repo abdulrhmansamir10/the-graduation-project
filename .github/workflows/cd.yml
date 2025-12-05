@@ -104,122 +104,89 @@ jobs:
           cache-to: type=gha,mode=max
           
   # --------------------------------------------------------------------------
-  # Job 2: Deploy to Production
+  # Job 2: Deploy to Production (Using Ansible)
+  # --------------------------------------------------------------------------
+  # WHY ANSIBLE:
+  # - Proper Configuration Management (not raw shell scripts)
+  # - Idempotent: Safe to run multiple times
+  # - Handles both initial setup and updates
+  # - Professional DevOps practice
   # --------------------------------------------------------------------------
   deploy:
-    name: Deploy to Production
+    name: Deploy with Ansible
     runs-on: ubuntu-latest
     needs: build-and-push
     
     steps:
-      - name: Checkout code (for scripts)
+      - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Create .env file
+      # ----------------------------------------------------------------------
+      # Step 1: Install Ansible and required collections
+      # ----------------------------------------------------------------------
+      - name: Install Ansible
         run: |
-          cat > .env <<EOF
-          GITHUB_USERNAME=${{ secrets.GITHUB_USERNAME }}
-          GITHUB_REPO=${{ github.event.repository.name }}
-          DB_HOST=${{ secrets.DB_HOST }}
-          DB_NAME=${{ secrets.DB_NAME }}
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-          APP_SECRET_KEY=${{ secrets.APP_SECRET_KEY }}
-          EOF
+          sudo apt-get update
+          sudo apt-get install -y ansible
+          echo "✅ Ansible installed: $(ansible --version | head -1)"
           
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.ELASTIC_IP }}
-          username: ubuntu
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script_stop: true
-          script: |
-            set -e  # Exit on error
-            
-            echo "🚀 Starting deployment..."
-            
-            # Navigate to app directory
-            cd /home/ubuntu/app || exit 1
-            
-            # Backup current docker-compose.yml
-            if [ -f docker-compose.yml ]; then
-              cp docker-compose.yml docker-compose.yml.backup
-              echo "✅ Backed up docker-compose.yml"
-            fi
-            
-            # Pull latest images
-            echo "📥 Pulling latest Docker images..."
-            docker compose pull
-            
-            # Health check before deployment
-            echo "🏥 Checking current application health..."
-            if curl -f http://localhost/health; then
-              echo "✅ Current application is healthy"
-            else
-              echo "⚠️  Current application health check failed (may be first deployment)"
-            fi
-            
-            # Deploy with rolling update
-            echo "🔄 Deploying new version..."
-            docker compose up -d --remove-orphans
-            
-            # Wait for services to start
-            echo "⏳ Waiting for services to start (30 seconds)..."
-            sleep 30
-            
-            # Health check after deployment
-            echo "🏥 Verifying deployment health..."
-            MAX_RETRIES=10
-            RETRY_COUNT=0
-            
-            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-              if curl -f http://localhost/health; then
-                echo "✅ Deployment successful! Application is healthy."
-                
-                # Clean up old images
-                echo "🧹 Cleaning up old Docker images..."
-                docker image prune -af --filter "until=24h"
-                
-                echo "🎉 Deployment completed successfully!"
-                exit 0
-              else
-                RETRY_COUNT=$((RETRY_COUNT + 1))
-                echo "⏳ Health check failed. Retry $RETRY_COUNT/$MAX_RETRIES..."
-                sleep 10
-              fi
-            done
-            
-            # Rollback if health checks failed
-            echo "❌ Deployment failed! Health checks did not pass."
-            echo "🔄 Rolling back to previous version..."
-            
-            if [ -f docker-compose.yml.backup ]; then
-              mv docker-compose.yml.backup docker-compose.yml
-              docker compose up -d
-              sleep 20
-              
-              if curl -f http://localhost/health; then
-                echo "✅ Rollback successful. Application restored."
-                exit 1
-              else
-                echo "❌ Rollback failed! Manual intervention required."
-                exit 1
-              fi
-            else
-              echo "❌ No backup found! Manual intervention required."
-              exit 1
-            fi
-            
-      - name: Upload .env to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.ELASTIC_IP }}
-          username: ubuntu
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: ".env"
-          target: "/home/ubuntu/app"
+      - name: Install Ansible collections
+        run: |
+          ansible-galaxy collection install community.docker
+          echo "✅ Ansible collections installed"
+          
+      # ----------------------------------------------------------------------
+      # Step 2: Setup SSH for Ansible
+      # ----------------------------------------------------------------------
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.ELASTIC_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "✅ SSH key configured"
+          
+      # ----------------------------------------------------------------------
+      # Step 3: Create static inventory for this deployment
+      # ----------------------------------------------------------------------
+      - name: Create Ansible inventory
+        run: |
+          cat > ansible/inventory/hosts.yml <<EOF
+          all:
+            hosts:
+              production:
+                ansible_host: ${{ secrets.ELASTIC_IP }}
+                ansible_user: ubuntu
+                ansible_ssh_private_key_file: ~/.ssh/id_rsa
+                ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+            children:
+              env_production:
+                hosts:
+                  production:
+          EOF
+          echo "✅ Ansible inventory created"
+          cat ansible/inventory/hosts.yml
+          
+      # ----------------------------------------------------------------------
+      # Step 4: Run Ansible Playbook (Provision + Deploy)
+      # ----------------------------------------------------------------------
+      - name: Deploy with Ansible
+        env:
+          # Pass secrets as environment variables for Ansible
+          GITHUB_USERNAME: ${{ secrets.GITHUB_USERNAME }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
+        run: |
+          echo "🚀 Starting Ansible deployment..."
+          cd ansible
+          ansible-playbook playbooks/site.yml \
+            -i inventory/hosts.yml \
+            -v
+          echo "✅ Ansible deployment completed"
           
   # --------------------------------------------------------------------------
   # Job 3: Verify Deployment

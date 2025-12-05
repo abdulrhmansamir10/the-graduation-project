@@ -100,3 +100,8 @@ docker-compose.override.yml
 # ----------------------------------------------------------------------------
 ansible/*.retry
 ansible/inventory/hosts.yml
+
+# ----------------------------------------------------------------------------
+# User Data (full version kept locally for education)
+# ----------------------------------------------------------------------------
+infra/user_data.sh

@@ -1,0 +1,203 @@
+---
+# ============================================================================
+# COMBINED PROVISION + DEPLOY PLAYBOOK (CI/CD Ready)
+# ============================================================================
+#
+# WHAT: Ensures server is configured AND deploys the latest application
+# WHY: Used by GitHub Actions - handles both initial setup and updates
+# WHEN: Every CI/CD deployment (idempotent - safe to run multiple times)
+#
+# FLOW:
+# 1. Check if Docker is installed
+# 2. If not → Install Docker and Docker Compose (provision)
+# 3. Create/update docker-compose.yml and .env files
+# 4. Pull latest images and restart containers
+# 5. Health check
+#
+# ============================================================================
+
+- name: 🚀 Provision & Deploy Application
+  hosts: env_production
+  become: yes
+  vars_files:
+    - ../vars.yml
+
+  vars:
+    image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest', true) }}"
+
+  tasks:
+    # ========================================================================
+    # STEP 1: SYSTEM PREREQUISITES
+    # ========================================================================
+    
+    - name: 📋 Show deployment info
+      debug:
+        msg: |
+          🚀 DEPLOYING: {{ image_tag }}
+          🖥️  Server: {{ inventory_hostname }}
+          📍 Directory: {{ app_directory }}
+      tags: always
+
+    - name: 🔄 Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: system
+
+    - name: 📦 Install essential packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - ca-certificates
+          - gnupg
+          - lsb-release
+        state: present
+      tags: system
+
+    # ========================================================================
+    # STEP 2: DOCKER INSTALLATION (Idempotent)
+    # ========================================================================
+    
+    - name: 🔍 Check if Docker is installed
+      command: docker --version
+      register: docker_check
+      failed_when: false
+      changed_when: false
+      tags: docker
+
+    - name: 🐳 Install Docker (if not present)
+      block:
+        - name: Download Docker install script
+          get_url:
+            url: https://get.docker.com
+            dest: /tmp/get-docker.sh
+            mode: '0755'
+        
+        - name: Run Docker install script
+          command: sh /tmp/get-docker.sh
+        
+        - name: Remove install script
+          file:
+            path: /tmp/get-docker.sh
+            state: absent
+      when: docker_check.rc != 0
+      tags: docker
+
+    - name: ▶️ Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      tags: docker
+
+    - name: 👤 Add ubuntu user to docker group
+      user:
+        name: "{{ app_user }}"
+        groups: docker
+        append: yes
+      tags: docker
+
+    - name: 🔧 Install Docker Compose (if not present)
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-Linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+      tags: docker
+
+    # ========================================================================
+    # STEP 3: APPLICATION SETUP
+    # ========================================================================
+    
+    - name: 📁 Create application directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0755'
+      loop:
+        - "{{ app_directory }}"
+        - "{{ app_directory }}/nginx/ssl"
+      tags: application
+
+    - name: 📝 Deploy docker-compose.yml
+      template:
+        src: ../templates/docker-compose.yml.j2
+        dest: "{{ app_directory }}/docker-compose.yml"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0644'
+      tags: application
+
+    - name: 🔐 Deploy .env file with secrets
+      template:
+        src: ../templates/env.j2
+        dest: "{{ app_directory }}/.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0600'
+      no_log: true
+      tags: application
+
+    # ========================================================================
+    # STEP 4: DEPLOY CONTAINERS
+    # ========================================================================
+    
+    - name: 💾 Backup current docker-compose (if exists)
+      copy:
+        src: "{{ app_directory }}/docker-compose.yml"
+        dest: "{{ app_directory }}/docker-compose.yml.backup"
+        remote_src: yes
+      ignore_errors: yes
+      tags: deploy
+
+    - name: 📥 Pull latest Docker images
+      command: docker-compose pull
+      args:
+        chdir: "{{ app_directory }}"
+      become_user: "{{ app_user }}"
+      tags: deploy
+
+    - name: 🚀 Start/Restart containers
+      command: docker-compose up -d --remove-orphans
+      args:
+        chdir: "{{ app_directory }}"
+      become_user: "{{ app_user }}"
+      tags: deploy
+
+    - name: ⏰ Wait for services to start
+      pause:
+        seconds: 30
+      tags: deploy
+
+    # ========================================================================
+    # STEP 5: HEALTH CHECK
+    # ========================================================================
+    
+    - name: 🏥 Verify application health
+      uri:
+        url: "http://localhost/health"
+        status_code: 200
+      register: health_check
+      retries: 5
+      delay: 10
+      tags: deploy
+
+    - name: 🧹 Clean up old Docker images
+      command: docker image prune -af --filter "until=24h"
+      ignore_errors: yes
+      tags: deploy
+
+    - name: ✅ Deployment successful!
+      debug:
+        msg: |
+          ═══════════════════════════════════════════
+          🎉 DEPLOYMENT SUCCESSFUL!
+          ═══════════════════════════════════════════
+          ✅ Server: {{ inventory_hostname }}
+          ✅ Version: {{ image_tag }}
+          ✅ Health: PASSED
+          ═══════════════════════════════════════════
+      tags: always
