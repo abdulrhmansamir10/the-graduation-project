@@ -62,8 +62,20 @@ echo "============================================"
 # - Rare failure: EIP already associated (race condition)
 #   Solution: AWS API handles this gracefully
 # ----------------------------------------------------------------------------
-echo "[Step 1/10] Associating Elastic IP..."
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+echo "[Step 1/10] Installing AWS CLI and associating Elastic IP..."
+
+# Install AWS CLI v2 (awscli package not available on Ubuntu 24.04)
+apt-get update -qq
+apt-get install -y unzip curl > /dev/null 2>&1
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+unzip -q /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install > /dev/null 2>&1
+rm -rf /tmp/awscliv2.zip /tmp/aws
+echo "AWS CLI installed: $(aws --version)"
+
+# IMDSv2: Get token first (required by launch template security settings)
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" -s)
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/instance-id)
 echo "Instance ID: $INSTANCE_ID"
 
 aws ec2 associate-address \

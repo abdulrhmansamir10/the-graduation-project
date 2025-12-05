@@ -25,7 +25,7 @@
 # ============================================================================
 
 terraform {
-  required_version = ">=1.15.0"
+  required_version = ">=1.0.0"
   
   required_providers {
     aws = {
@@ -47,16 +47,13 @@ terraform {
   # 4. Run: terraform init -migrate-state (moves state to S3)
   # 5. Done!
   # ============================================================================
+  # Backend now active - state stored in S3 with DynamoDB locking
   backend "s3" {
-    bucket         = "devops-terraform-state-samir-dgp-2024" # Globally unique bucket name
+    bucket         = "devops-terraform-state-samir-dgp-2024"
     key            = "prod/terraform.tfstate"
     region         = "eu-north-1"
     encrypt        = true
     dynamodb_table = "terraform-state-locks"
-    
-    # INSTRUCTIONS:
-    # Replace CHANGE-THIS with unique string (e.g., yourname-123)
-    # Example: "devops-terraform-state-john-doe-2024"
   }
 }
 
@@ -257,7 +254,7 @@ resource "aws_db_subnet_group" "main" {
 resource "aws_db_instance" "main" {
   identifier     = "devops-postgres"
   engine         = "postgres"
-  engine_version = "15.4"
+  engine_version = "15"  # Auto-selects latest 15.x available in region
   instance_class = "db.t3.micro" # FREE TIER
 
   # Storage
@@ -406,6 +403,7 @@ resource "aws_launch_template" "app_lt" {
   description   = "Launch template for self-healing application instances"
   image_id      = "ami-08eb150f611ca277f" # Ubuntu 22.04 LTS (eu-north-1)
   instance_type = "t3.micro"               # FREE TIER
+  key_name      = "dgp-kp-1"               # SSH key pair for access
 
   # IAM Instance Profile (for EIP association)
   iam_instance_profile {
