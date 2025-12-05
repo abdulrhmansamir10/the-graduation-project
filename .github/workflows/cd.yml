@@ -185,6 +185,13 @@ jobs:
           cd ansible
           ansible-playbook playbooks/site.yml \
             -i inventory/hosts.yml \
+            -e "github_username=$GITHUB_USERNAME" \
+            -e "db_host=$DB_HOST" \
+            -e "db_name=$DB_NAME" \
+            -e "db_user=$DB_USER" \
+            -e "db_password=$DB_PASSWORD" \
+            -e "redis_password=$REDIS_PASSWORD" \
+            -e "app_secret_key=$APP_SECRET_KEY" \
             -v
           echo "✅ Ansible deployment completed"
           
