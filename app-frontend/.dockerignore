@@ -1,0 +1,18 @@
+# Dependencies - always install fresh in Docker
+node_modules
+npm-debug.log*
+
+# Build output (we build in Docker)
+dist
+build
+
+# Development files
+.git
+.gitignore
+*.md
+.env*
+.DS_Store
+
+# IDE
+.vscode
+.idea
