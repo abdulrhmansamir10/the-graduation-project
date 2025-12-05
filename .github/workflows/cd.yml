@@ -41,7 +41,7 @@ concurrency:
 # - DB_PASSWORD: Database password
 # - REDIS_PASSWORD: Redis password
 # - APP_SECRET_KEY: Flask secret key
-# - GITHUB_USERNAME: Your GitHub username (for GHCR)
+# - GHCR_USERNAME: Your GitHub username (for GHCR)
 
 jobs:
   # --------------------------------------------------------------------------
@@ -173,7 +173,7 @@ jobs:
       - name: Deploy with Ansible
         env:
           # Pass secrets as environment variables for Ansible
-          GITHUB_USERNAME: ${{ secrets.GITHUB_USERNAME }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -185,7 +185,7 @@ jobs:
           cd ansible
           ansible-playbook playbooks/site.yml \
             -i inventory/hosts.yml \
-            -e "github_username=$GITHUB_USERNAME" \
+            -e "github_username=$GHCR_USERNAME" \
             -e "db_host=$DB_HOST" \
             -e "db_name=$DB_NAME" \
             -e "db_user=$DB_USER" \
