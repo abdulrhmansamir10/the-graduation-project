@@ -172,8 +172,9 @@ jobs:
       # ----------------------------------------------------------------------
       - name: Deploy with Ansible
         env:
-          # Pass secrets as environment variables for Ansible
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          # GitHub username from repository owner (not a secret, always available)
+          GHCR_USERNAME: ${{ github.repository_owner }}
+          # Secrets
           DB_HOST: ${{ secrets.DB_HOST }}
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -182,6 +183,7 @@ jobs:
           APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
         run: |
           echo "🚀 Starting Ansible deployment..."
+          echo "📦 Using GHCR username: $GHCR_USERNAME"
           cd ansible
           ansible-playbook playbooks/site.yml \
             -i inventory/hosts.yml \
