@@ -141,7 +141,7 @@ jobs:
             echo "🚀 Starting deployment..."
             
             # Navigate to app directory
-            cd /app || exit 1
+            cd /home/ubuntu/app || exit 1
             
             # Backup current docker-compose.yml
             if [ -f docker-compose.yml ]; then
@@ -219,7 +219,7 @@ jobs:
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: ".env"
-          target: "/app"
+          target: "/home/ubuntu/app"
           
   # --------------------------------------------------------------------------
   # Job 3: Verify Deployment
