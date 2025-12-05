@@ -1,0 +1,15 @@
+# Ansible Requirements
+# Install with: ansible-galaxy collection install -r requirements.yml
+
+collections:
+  # Docker management
+  - name: community.docker
+    version: ">=3.4.0"
+  
+  # AWS modules (for dynamic inventory and AWS operations)
+  - name: amazon.aws
+    version: ">=6.0.0"
+  
+  # General utilities
+  - name: community.general
+    version: ">=7.0.0"

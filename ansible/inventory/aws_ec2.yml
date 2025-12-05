@@ -1,0 +1,194 @@
+# ============================================================================
+# AWS EC2 DYNAMIC INVENTORY CONFIGURATION
+# ============================================================================
+#
+# 🎯 WHAT IS THIS?
+# This file configures Ansible's AWS EC2 plugin to automatically discover
+# EC2 instances from your AWS account. No manual IP address management!
+#
+# 💡 WHY DYNAMIC INVENTORY?
+# 
+# PROBLEM WITH STATIC INVENTORY:
+# - EC2 instances get new IPs when replaced by Auto Scaling Group
+# - Manual updates needed every time IP changes
+# - Error-prone and time-consuming
+#
+# SOLUTION WITH DYNAMIC INVENTORY:
+# - Query AWS API in real-time
+# - Automatically discover running instances
+# - Filter by tags (only target our production servers)
+# - No manual updates needed!
+#
+# 🔧 HOW IT WORKS:
+# 1. Ansible calls AWS EC2 API (using your AWS credentials)
+# 2. Retrieves list of all EC2 instances in specified regions
+# 3. Filters instances based on tags and state
+# 4. Groups instances by tags for easy targeting
+# 5. Returns inventory to Ansible
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Plugin Configuration
+# ----------------------------------------------------------------------------
+# Specifies this is an AWS EC2 dynamic inventory source
+plugin: aws_ec2
+
+# ----------------------------------------------------------------------------
+# AWS Region Configuration
+# ----------------------------------------------------------------------------
+# WHAT: Which AWS regions to scan for EC2 instances
+# WHY: Limits API calls and improves performance
+# NOTE: Add more regions if you have multi-region deployment
+regions:
+  - eu-north-1  # Stockholm (our production region)
+  # - us-east-1  # Uncomment if you expand to US
+  # - eu-west-1  # Uncomment if you expand to Ireland
+
+# ----------------------------------------------------------------------------
+# CRITICAL: Instance Filtering
+# ----------------------------------------------------------------------------
+# WHAT: Only include instances matching ALL these conditions
+# WHY: Prevent Ansible from managing wrong instances
+#
+# FILTERS EXPLAINED:
+# 1. tag:Environment=production → Only production instances (not dev/test)
+# 2. tag:ManagedBy=Terraform-ASG → Only instances from our Auto Scaling Group
+# 3. instance-state-name=running → Skip terminated/stopped instances
+#
+# SAFETY: If you have other EC2 instances, they WON'T be affected!
+filters:
+  # Only production environment
+  tag:Environment: production
+  
+  # Only instances managed by our Terraform ASG
+  # (matches the tag in infra/main.tf)
+  tag:ManagedBy: Terraform-ASG
+  
+  # Only running instances (skip stopped/terminated)
+  instance-state-name: running
+
+# ----------------------------------------------------------------------------
+# Dynamic Group Creation (THIS IS POWERFUL!)
+# ----------------------------------------------------------------------------
+# WHAT: Automatically create Ansible groups from AWS tags
+# WHY: Target instances by environment, application, or any custom tag
+#
+# EXAMPLE OUTPUT:
+# If instance has tags:
+#   - Environment: production
+#   - Application: pricing-calculator
+#
+# Ansible creates groups:
+#   - env_production
+#   - app_pricing_calculator
+#
+# USAGE IN PLAYBOOKS:
+#   hosts: env_production     # Target all production instances
+#   hosts: app_pricing_calculator  # Target specific application
+keyed_groups:
+  # Create group from Environment tag (env_production, env_staging, etc.)
+  - key: tags.Environment
+    prefix: env
+    separator: "_"
+  
+  # Create group from Application tag (app_pricing_calculator, etc.)
+  - key: tags.Application
+    prefix: app
+    separator: "_"
+  
+  # Create group from instance type (type_t3_micro, type_t3_small, etc.)
+  - key: instance_type
+    prefix: type
+    separator: "_"
+
+# ----------------------------------------------------------------------------
+# Hostname Configuration
+# ----------------------------------------------------------------------------
+# WHAT: Defines how Ansible identifies each host
+# WHY: Need human-readable names AND connection addresses
+#
+# ORDER MATTERS: Ansible tries each option until it finds one
+# 1. tag:Name → Use the instance's Name tag (e.g., "devops-app-server")
+# 2. public-ip-address → Fallback to IP if no Name tag
+hostnames:
+  - tag:Name
+  - public-ip-address
+
+# ----------------------------------------------------------------------------
+# Host Variables (Connection Details)
+# ----------------------------------------------------------------------------
+# WHAT: Set Ansible variables for each discovered host
+# WHY: Tell Ansible how to connect to instances
+#
+# COMPOSE EXPLAINED:
+# - ansible_host: The IP address Ansible uses for SSH
+# - Uses public_ip_address from AWS (instances are publicly accessible)
+compose:
+  # Primary connection address (public IP for SSH)
+  ansible_host: public_ip_address
+  
+  # Optional: Add custom variables
+  # ec2_region: placement.region
+  # ec2_az: placement.availability_zone
+
+# ----------------------------------------------------------------------------
+# Strict Mode (Error Handling)
+# ----------------------------------------------------------------------------
+# WHAT: Controls behavior when required values are missing
+# WHY: Set to False to skip instances without required fields
+# EXAMPLE: If instance has no public IP, skip it instead of erroring
+strict: False
+
+# ============================================================================
+# TESTING DYNAMIC INVENTORY
+# ============================================================================
+#
+# After creating this file, test it with these commands:
+#
+# 1. List all discovered hosts:
+#    ansible-inventory -i inventory/aws_ec2.yml --list
+#
+# 2. View hosts in a tree structure:
+#    ansible-inventory -i inventory/aws_ec2.yml --graph
+#
+# 3. Test connection to discovered hosts:
+#    ansible all -i inventory/aws_ec2.yml -m ping
+#
+# 4. See which hosts are in a specific group:
+#    ansible env_production -i inventory/aws_ec2.yml --list-hosts
+#
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+#
+# PROBLEM: "No hosts matched"
+# SOLUTION: 
+#   - Check AWS credentials (aws configure)
+#   - Verify tags match (Environment=production, ManagedBy=Terraform-ASG)
+#   - Confirm instance is running
+#
+# PROBLEM: "Permission denied"
+# SOLUTION:
+#   - AWS IAM user needs ec2:DescribeInstances permission
+#   - Check ~/.aws/credentials file exists
+#
+# PROBLEM: "Connection timeout"
+# SOLUTION:
+#   - Verify security group allows SSH from your IP
+#   - Check SSH key path in ansible.cfg
+#   - Confirm instance has public IP
+#
+# ============================================================================
+# AWS CREDENTIALS
+# ============================================================================
+#
+# This plugin uses AWS credentials from (in order):
+# 1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+# 2. ~/.aws/credentials file (created by 'aws configure')
+# 3. IAM instance profile (if running Ansible from EC2)
+# 4. AWS SSO
+#
+# RECOMMENDED: Use 'aws configure' to set up credentials
+#
+# ============================================================================

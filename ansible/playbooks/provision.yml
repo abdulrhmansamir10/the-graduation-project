@@ -1,0 +1,205 @@
+---
+# ============================================================================
+# SIMPLE ANSIBLE PROVISION PLAYBOOK (Beginner-Friendly)
+# ============================================================================
+#
+# WHAT: Installs Docker and deploys your application on EC2 servers
+# WHY: Automates server setup instead of manual configuration
+# WHEN: After Terraform creates your infrastructure
+#
+# SIMPLE EXPLANATION:
+# Think of this like a recipe that tells the server what to do:
+# 1. Update the system (like updating your phone)
+# 2. Install Docker (the tool that runs containers)
+# 3. Deploy your application (start your banking app)
+#
+# TERRAFORM vs ANSIBLE (Important!):
+# - Terraform CREATES infrastructure (builds the server, network, database)
+# - Ansible CONFIGURES infrastructure (installs software, deploys app)
+# They work together but do different jobs!
+#
+# USAGE:
+#   # See what would change (safe, no actual changes):
+#   ansible-playbook ansible/playbooks/provision.yml --check
+#
+#   # Actually run it:
+#   ansible-playbook ansible/playbooks/provision.yml
+# ============================================================================
+
+- name: 🚀 Setup and Deploy Application
+  hosts: env_production  # Targets production servers from inventory
+  become: yes            # Run as admin (sudo)
+  vars_files:
+    - vars.yml          # Load configuration variables
+  
+  tasks:
+    # ========================================================================
+    # STEP 1: UPDATE SYSTEM
+    # ========================================================================
+    
+    - name: 🔄 Update system packages
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600  # Cache valid for 1 hour
+      tags: system
+
+    - name: 📦 Install essential tools
+      apt:
+        name:
+          - curl          # Download files
+          - wget          # Download files (alternative)
+          - git           # Version control
+          - vim           # Text editor
+          - htop          # System monitoring
+          - net-tools     # Network utilities
+          - ca-certificates  # SSL certificates
+          - gnupg         # Security keys
+          - lsb-release   # System information
+        state: present
+      tags: system
+
+    # ========================================================================
+    # STEP 2: INSTALL DOCKER
+    # ========================================================================
+    
+    - name: 🔍 Check if Docker is already installed
+      command: docker --version
+      register: docker_check
+      failed_when: false        # Don't fail if Docker not found
+      changed_when: false       # Don't mark as changed
+      tags: docker
+
+    - name: 🐳 Install Docker (if needed)
+      block:
+        - name: Download Docker installation script
+          get_url:
+            url: https://get.docker.com
+            dest: /tmp/get-docker.sh
+            mode: '0755'
+        
+        - name: Run Docker installation script
+          command: sh /tmp/get-docker.sh
+        
+        - name: Clean up installation script
+          file:
+            path: /tmp/get-docker.sh
+            state: absent
+      when: docker_check.rc != 0  # Only if Docker not installed
+      tags: docker
+
+    - name: ▶️ Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes  # Start automatically on boot
+      tags: docker
+
+    - name: 🔧 Install Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-Linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+      tags: docker
+
+    # ========================================================================
+    # STEP 3: DEPLOY APPLICATION
+    # ========================================================================
+    
+    - name: 📁 Create application directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0755'
+      loop:
+        - "{{ app_directory }}"
+        - "{{ app_directory }}/nginx/ssl"
+      tags: application
+
+    - name: 📝 Create docker-compose.yml file
+      template:
+        src: templates/docker-compose.yml.j2
+        dest: "{{ app_directory }}/docker-compose.yml"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0644'
+      tags: application
+
+    - name: 🔐 Create .env file with secrets
+      template:
+        src: templates/env.j2
+        dest: "{{ app_directory }}/.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0600'  # Only owner can read/write
+      no_log: true  # Don't show secrets in terminal output
+      tags: application
+
+    - name: 📥 Pull Docker images
+      community.docker.docker_compose:
+        project_src: "{{ app_directory }}"
+        pull: yes
+      become_user: "{{ app_user }}"
+      tags: application
+
+    - name: 🚀 Start application containers
+      community.docker.docker_compose:
+        project_src: "{{ app_directory }}"
+        state: present
+        restarted: yes
+      become_user: "{{ app_user }}"
+      tags: application
+
+    - name: ⏰ Wait for services to start
+      pause:
+        seconds: 30
+      tags: application
+
+    - name: 🏥 Health check
+      uri:
+        url: "http://localhost/health"
+        status_code: 200
+      retries: 3  # Try 3 times
+      delay: 10   # Wait 10 seconds between tries
+      tags: application
+
+    - name: ✅ Show success message
+      debug:
+        msg: |
+          ═══════════════════════════════════════════
+          🎉 SERVER CONFIGURED SUCCESSFULLY!
+          ═══════════════════════════════════════════
+          Host: {{ inventory_hostname }}
+          IP: {{ ansible_host }}
+          Application: Running and Healthy ✅
+          ═══════════════════════════════════════════
+      tags: always
+
+# ============================================================================
+# NOTES FOR PRESENTATION:
+# ============================================================================
+#
+# Q: Why no UFW firewall configuration?
+# A: AWS Security Groups (configured in Terraform) already control all
+#    network traffic at the infrastructure level. Adding UFW would be
+#    redundant - like having two locks on the same door.
+#
+# Q: Where is the security?
+# A: In Terraform's infra/main.tf:
+#    - Security Groups allow only SSH (from your IP), HTTP, and HTTPS
+#    - Everything else is blocked by default
+#    - This is done at AWS level, before traffic reaches the server
+#
+# Q: What about SSH hardening?
+# A: Already secure:
+#    - Using SSH keys (not passwords)
+#    - Terraform restricts SSH to your IP only
+#    - No need for additional configuration
+#
+# Q: How does this work with Terraform's user_data.sh?
+# A: They complement each other:
+#    - user_data.sh: Runs ONCE when server is first created
+#    - Ansible: Can run ANYTIME to update configuration
+#    - Both do similar things, Ansible gives you more control
+# ============================================================================

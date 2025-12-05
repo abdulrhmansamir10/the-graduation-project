@@ -1,0 +1,56 @@
+---
+# ============================================================================
+# VARIABLES FILE (All Configuration in One Place)
+# ============================================================================
+#
+# WHY THIS FILE:
+# - Single source of truth for all Ansible variables
+# - Easy to customize for your environment
+# - Keeps playbooks clean and reusable
+#
+# USAGE:
+# These variables are automatically loaded when running playbooks.
+# Override with: ansible-playbook provision.yml -e "variable_name=value"
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# AWS & Infrastructure
+# ----------------------------------------------------------------------------
+aws_region: "eu-north-1"
+eip_allocation_id: "{{ lookup('env', 'EIP_ALLOCATION_ID') | default('', true) }}"
+
+# ----------------------------------------------------------------------------
+# Application Configuration
+# ----------------------------------------------------------------------------
+app_directory: "/home/ubuntu/app"
+app_user: "ubuntu"
+app_group: "ubuntu"
+
+# GitHub Container Registry
+github_username: "{{ lookup('env', 'GITHUB_USERNAME') | default('YOUR_GITHUB_USERNAME', true) }}"
+github_repo: "the-graduation-project"
+
+# ----------------------------------------------------------------------------
+# Database (RDS)
+# ----------------------------------------------------------------------------
+db_host: "{{ lookup('env', 'DB_HOST') | default('devops-postgres.xxxxx.rds.amazonaws.com', true) }}"
+db_port: 5432
+db_name: "{{ lookup('env', 'DB_NAME') | default('appdb', true) }}"
+db_user: "{{ lookup('env', 'DB_USER') | default('dbadmin', true) }}"
+db_password: "{{ lookup('env', 'DB_PASSWORD') }}"
+
+# ----------------------------------------------------------------------------
+# Redis
+# ----------------------------------------------------------------------------
+redis_password: "{{ lookup('env', 'REDIS_PASSWORD') }}"
+redis_port: 6379
+
+# ----------------------------------------------------------------------------
+# Application Secrets
+# ----------------------------------------------------------------------------
+app_secret_key: "{{ lookup('env', 'APP_SECRET_KEY') }}"
+
+# ----------------------------------------------------------------------------
+# Docker Configuration
+# ----------------------------------------------------------------------------
+docker_compose_version: "2.20.0"

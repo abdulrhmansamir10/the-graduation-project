@@ -1,0 +1,174 @@
+version: '3.8'
+
+# ============================================================================
+# Production Docker Compose Configuration
+# ============================================================================
+# 
+# WHAT: Defines how our application containers run in production
+#
+# KEY CHANGES FROM DEV:
+# 1. NO DATABASE CONTAINER: Connects to AWS RDS (Free Tier)
+# 2. SECURITY HARDENING: Resource limits, log rotation, non-root users
+# 3. NETWORK ISOLATION: Internal bridge network
+#
+# SERVICES:
+# - Redis: Caching layer (runs in container)
+# - Backend: Flask API (connects to RDS)
+# - Frontend: Nginx + React (serves static files)
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # Redis Cache
+  # --------------------------------------------------------------------------
+  # ROLE: Caching calculation results and rate limiting data
+  # SECURITY: Password protected, no host port exposure
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    
+    # Security: Require password
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    
+    # Persistence: Save cache data (optional but good for restarts)
+    volumes:
+      - redis_data:/data
+      
+    # Health Check: Ensure Redis is actually ready
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      
+    # Resource Limits: Prevent noisy neighbor effect
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'      # Max 25% of 1 CPU
+          memory: 256M      # Max 256MB RAM
+          
+    # Log Rotation: Prevent disk filling up
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        
+    networks:
+      - app-network
+
+  # --------------------------------------------------------------------------
+  # Backend API (Flask)
+  # --------------------------------------------------------------------------
+  # ROLE: Core application logic
+  # CONNECTS TO: AWS RDS (PostgreSQL) and Redis container
+  # --------------------------------------------------------------------------
+  backend:
+    # Image from GitHub Container Registry
+    image: ghcr.io/${GITHUB_USERNAME}/${GITHUB_REPO}:latest
+    container_name: app-backend
+    restart: unless-stopped
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+        
+    environment:
+      # Database Connection (RDS)
+      # Values come from .env file (populated by User Data script)
+      POSTGRES_HOST: ${DB_HOST}
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      
+      # Redis Connection
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      
+      # Application Security
+      SECRET_KEY: ${APP_SECRET_KEY}
+      FLASK_ENV: production
+      
+    # Expose port 5000 to other containers ONLY (not host)
+    expose:
+      - "5000"
+      
+    # Health Check: Verifies API is responding
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Give Gunicorn time to start
+      
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'       # Max 1 full CPU
+          memory: 1G        # Max 1GB RAM
+          
+    # Log Rotation
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        
+    networks:
+      - app-network
+
+  # --------------------------------------------------------------------------
+  # Frontend (Nginx + React)
+  # --------------------------------------------------------------------------
+  # ROLE: Web server and reverse proxy
+  # EXPOSES: Ports 80 and 443 to the world
+  # --------------------------------------------------------------------------
+  frontend:
+    image: ghcr.io/${GITHUB_USERNAME}/${GITHUB_REPO}-frontend:latest
+    container_name: app-frontend
+    restart: unless-stopped
+    
+    depends_on:
+      backend:
+        condition: service_healthy
+        
+    # Public Ports
+    ports:
+      - "80:80"
+      - "443:443"
+      
+    # SSL Certificates (mounted from host)
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'       # Max 50% of 1 CPU
+          memory: 256M      # Max 256MB RAM
+          
+    # Log Rotation
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        
+    networks:
+      - app-network
+
+# ----------------------------------------------------------------------------
+# Volumes & Networks
+# ----------------------------------------------------------------------------
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

@@ -1,0 +1,106 @@
+---
+# ============================================================================
+# SIMPLE ANSIBLE DEPLOY PLAYBOOK (Beginner-Friendly)
+# ============================================================================
+#
+# WHAT: Updates your application to the latest version
+# WHY: Quick updates without re-configuring the entire server
+# WHEN: After CI/CD builds new Docker images, or when you want to update
+#
+# SIMPLE EXPLANATION:
+# Think of this like updating an app on your phone:
+# 1. Backup current version (in case something goes wrong)
+# 2. Download the new version
+# 3. Restart the app with the new version
+# 4. Check that it's working
+#
+# DIFFERENCE FROM PROVISION.YML:
+# - provision.yml: Full server setup (install Docker, configure everything)
+# - deploy.yml: Just update the application (faster, simpler)
+#
+# USAGE:
+#   # Deploy latest version:
+#   ansible-playbook ansible/playbooks/deploy.yml
+#
+#   # Deploy specific version:
+#   ansible-playbook ansible/playbooks/deploy.yml -e "image_tag=v1.2.3"
+# ============================================================================
+
+- name: 🚢 Deploy Application Update
+  hosts: env_production  # Target production servers
+  become: yes            # Run as admin (sudo)
+  vars_files:
+    - ../vars.yml       # Load configuration variables
+  
+  vars:
+    image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest', true) }}"
+
+  tasks:
+    - name: 📋 Show what we're deploying
+      debug:
+        msg: |
+          🚀 DEPLOYING: {{ image_tag }}
+          🖥️  Target Server: {{ inventory_hostname }}
+      tags: always
+
+    - name: 💾 Backup current configuration
+      copy:
+        src: "{{ app_directory }}/docker-compose.yml"
+        dest: "{{ app_directory }}/docker-compose.yml.backup"
+        remote_src: yes  # File is on the server, not local
+      tags: backup
+      # WHY: If new version has problems, we can quickly restore
+
+    - name: 📥 Pull latest Docker images
+      community.docker.docker_compose:
+        project_src: "{{ app_directory }}"
+        pull: yes
+      become_user: "{{ app_user }}"
+      tags: deploy
+
+    - name: 🔄 Restart containers with new images
+      community.docker.docker_compose:
+        project_src: "{{ app_directory }}"
+        restarted: yes
+      become_user: "{{ app_user }}"
+      tags: deploy
+
+    - name: ⏰ Wait for application to start
+      pause:
+        seconds: 30
+      tags: deploy
+
+    - name: 🏥 Verify application is healthy
+      uri:
+        url: "http://localhost/health"
+        status_code: 200
+      retries: 3  # Try 3 times
+      delay: 10   # Wait 10 seconds between tries
+      tags: deploy
+
+    - name: ✅ Deployment successful!
+      debug:
+        msg: "🎉 Application updated successfully to {{ image_tag }}!"
+      tags: always
+
+# ============================================================================
+# NOTES FOR PRESENTATION:
+# ============================================================================
+#
+# Q: When do I use provision.yml vs deploy.yml?
+# A: 
+#   - provision.yml: When setting up a NEW server or major changes
+#   - deploy.yml: When updating the APPLICATION code (most common)
+#
+# Q: What if deployment fails?
+# A: You have a backup! You can restore the old docker-compose.yml
+#    and restart: docker-compose up -d
+#
+# Q: Why only 3 retries instead of 10?
+# A: Simpler for demos. If app doesn't start in 30 seconds (3 × 10s),
+#    something is probably wrong. Better to fail fast and investigate.
+#
+# Q: How does this fit in CI/CD?
+# A: GitHub Actions (or Jenkins) builds Docker image → pushes to registry
+#    → runs this playbook to deploy to servers
+# ============================================================================
